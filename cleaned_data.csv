@@ -1,0 +1,1 @@
+user_id,timestamp,glucose,cgm_quality_flag,insulin_bolus,insulin_basal,carbs,meal_type,exercise_steps,exercise_intensity,heart_rate,skin_temp,gsr,sleep_stage,medication_other,stress_level,alcohol,notes,device_id,hbA1c,age,sex,weight,carb_ratio,insulin_sensitivity,timezone,region,glucose_lag_1,glucose_lag_3,glucose_lag_6,glucose_roll_mean_1h
