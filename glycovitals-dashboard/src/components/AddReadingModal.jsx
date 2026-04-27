@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ref, set } from 'firebase/database';
 import { db } from '../firebase';
 import { subscribeDeviceLive } from '../services/glucoseService';
+import { subscribeDemoState } from '../services/demoMode';
 import { useAuth } from '../context/AuthContext';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -177,6 +178,14 @@ export default function AddReadingModal({ patientId, readings = [], onClose }) {
   const [manualHRMode, setManualHRMode]   = useState(false);
   const [manualTempMode, setManualTempMode] = useState(false);
 
+  // ── ESP32 Demo Mode awareness ─────────────────────────────────────────────
+  const [demoState, setDemoState] = useState({ active: false, glucose: 0, heartRate: 0, temperature: 0 });
+
+  useEffect(() => {
+    const unsub = subscribeDemoState(setDemoState);
+    return () => unsub();
+  }, []);
+
   // Subscribe to ESP32 live data
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -206,13 +215,18 @@ export default function AddReadingModal({ patientId, readings = [], onClose }) {
     }
   }, [deviceData]);
 
+  // ── Derived device state (needed before resolvedHR/Temp) ─────────────────
+  const deviceIsOnline = demoState.active || deviceData?.isOnline === true;
+  const effectiveHR   = demoState.active ? demoState.heartRate   : (deviceData?.heartRate   ?? null);
+  const effectiveTemp = demoState.active ? demoState.temperature : (deviceData?.temperature ?? null);
+
   // Resolved sensor values (hardware preferred, manual fallback)
-  const resolvedHR   = (deviceData?.isOnline && deviceData?.heartRate)
-    ? deviceData.heartRate
+  const resolvedHR   = deviceIsOnline
+    ? effectiveHR
     : (manualHRMode && form.manualHR ? Number(form.manualHR) : null);
 
-  const resolvedTemp = (deviceData?.isOnline && deviceData?.temperature)
-    ? deviceData.temperature
+  const resolvedTemp = deviceIsOnline
+    ? effectiveTemp
     : (manualTempMode && form.manualTemp ? Number(form.manualTemp) : null);
 
   // Can we save? All 3 values must be present
@@ -294,7 +308,6 @@ export default function AddReadingModal({ patientId, readings = [], onClose }) {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const deviceIsOnline = deviceData?.isOnline === true;
 
   return (
     <>
@@ -318,11 +331,11 @@ export default function AddReadingModal({ patientId, readings = [], onClose }) {
               {!deviceLoading && (
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
                   deviceIsOnline
-                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+                    ? 'bg-green-500/10 border-green-500/30 text-green-400'
                     : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                 }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full inline-block ${deviceIsOnline ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
-                  {deviceIsOnline ? 'Device Online' : 'Device Offline'}
+                  <span className={`w-1.5 h-1.5 rounded-full inline-block ${deviceIsOnline ? 'bg-green-400 animate-pulse' : 'bg-amber-400'}`} />
+                  {demoState.active ? 'ESP32 Live ●' : deviceIsOnline ? 'Device Online' : 'Device Offline'}
                 </span>
               )}
               <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 transition-all">✕</button>
@@ -371,8 +384,20 @@ export default function AddReadingModal({ patientId, readings = [], onClose }) {
                 )}
               </div>
 
-              {/* Offline banner */}
-              {!deviceLoading && !deviceIsOnline && (
+              {/* Online/Offline banner */}
+              {!deviceLoading && deviceIsOnline ? (
+                <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-green-500/8 border border-green-500/25 rounded-xl text-green-400 text-xs">
+                  <span className="text-base mt-0.5">✅</span>
+                  <div>
+                    <div className="font-semibold">Sensor device connected ✓</div>
+                    <div className="text-green-400/70 mt-0.5">
+                      {demoState.active
+                        ? 'ESP32 Demo Mode active — live sensor values streaming in real time.'
+                        : 'ESP32 sensor online — vitals are being read automatically.'}
+                    </div>
+                  </div>
+                </div>
+              ) : !deviceLoading && !deviceIsOnline && (
                 <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/25 rounded-xl text-amber-400 text-xs">
                   <span className="text-base mt-0.5">⚠️</span>
                   <div>
@@ -391,10 +416,10 @@ export default function AddReadingModal({ patientId, readings = [], onClose }) {
                     <SensorPanel
                       icon="💓"
                       label="Heart Rate"
-                      value={deviceData?.heartRate ?? null}
+                      value={effectiveHR}
                       unit="bpm"
                       isOnline={deviceIsOnline}
-                      isLoading={deviceLoading}
+                      isLoading={deviceLoading && !demoState.active}
                       showManualToggle
                       onManualToggle={() => setManualHRMode(true)}
                     />
@@ -430,10 +455,10 @@ export default function AddReadingModal({ patientId, readings = [], onClose }) {
                     <SensorPanel
                       icon="🌡️"
                       label="Temperature"
-                      value={deviceData?.temperature ?? null}
+                      value={effectiveTemp}
                       unit="°C"
                       isOnline={deviceIsOnline}
-                      isLoading={deviceLoading}
+                      isLoading={deviceLoading && !demoState.active}
                       showManualToggle
                       onManualToggle={() => setManualTempMode(true)}
                     />

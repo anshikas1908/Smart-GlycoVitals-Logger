@@ -1,10 +1,17 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { useAllReadings, usePrediction } from '../hooks/usePatientData';
 import { getGlucoseColor, getGlucoseLabel, getGlucoseStatus, getGlucoseStatus as statusOf, calculateTIR } from '../utils/glucose';
 import { LSTM_MIN } from '../utils/predictions';
 import SystemFlowBanner from '../components/SystemFlowBanner';
+import {
+  startDemoMode,
+  stopDemoMode,
+  subscribeDemoState,
+  clearBadReadings,
+  pushFreshReading,
+} from '../services/demoMode';
 
 // ── Chart time-range windows ──────────────────────────────────────────────────
 const CHART_RANGES = [
@@ -144,7 +151,10 @@ function GlucoseCard({ value, label, mode, isPrediction, timestamp, predTimestam
   );
 }
 
-function VitalCard({ icon, label, value, unit, sub }) {
+function VitalCard({ icon, label, value, unit, sub, displayOverride }) {
+  // displayOverride allows passing "--" for bad values
+  const displayValue = displayOverride !== undefined ? displayOverride : (value || '—');
+
   return (
     <div className="card-hover">
       <div className="flex items-center gap-2 mb-3">
@@ -152,7 +162,9 @@ function VitalCard({ icon, label, value, unit, sub }) {
         <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">{label}</span>
       </div>
       <div className="flex items-end gap-1.5">
-        <div className="text-3xl font-bold text-white">{value || '—'}</div>
+        <div className={`text-3xl font-bold ${label === 'Temperature' && value && value >= 35 && value <= 38 ? 'text-cyan-300' : 'text-white'}`}>
+          {displayValue}
+        </div>
         <div className="text-gray-400 mb-1 text-sm">{unit}</div>
       </div>
       {sub && <div className="text-xs text-gray-500 mt-1.5">{sub}</div>}
@@ -219,6 +231,39 @@ export default function Dashboard() {
   const { readings, loading, error, isDemoMode } = useAllReadings(patientId);
   const [chartRange, setChartRange] = useState('24h');
 
+  // ── ESP32 Demo Mode state ───────────────────────────────────────────────
+  const [esp32Demo, setEsp32Demo] = useState({ active: false, glucose: 0, heartRate: 0, temperature: 0 });
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanMsg, setCleanMsg] = useState('');
+
+  useEffect(() => {
+    const unsub = subscribeDemoState(setEsp32Demo);
+    return () => unsub();
+  }, []);
+
+  const handleToggleDemo = () => {
+    if (esp32Demo.active) {
+      stopDemoMode(patientId);
+    } else {
+      startDemoMode(patientId);
+    }
+  };
+
+  const handleCleanData = async () => {
+    setCleaning(true);
+    setCleanMsg('');
+    try {
+      const removed = await clearBadReadings(patientId);
+      await pushFreshReading(patientId);
+      setCleanMsg(`Removed ${removed} bad readings & pushed fresh data ✅`);
+      setTimeout(() => setCleanMsg(''), 4000);
+    } catch (err) {
+      setCleanMsg('Failed to clean data ❌');
+    } finally {
+      setCleaning(false);
+    }
+  };
+
   const {
     predicted30min,
     mode: predMode,
@@ -233,6 +278,13 @@ export default function Dashboard() {
   const currentGlucose = latest?.glucose ?? null;
   const latestHR      = latest?.heartRate ?? null;
   const latestTemp    = latest?.temperature ?? null;
+
+  // ── Temperature display logic (Problem 4) ──────────────────────────────
+  const tempDisplay = (() => {
+    if (latestTemp === null || latestTemp === undefined) return { value: null, display: '—', sub: 'No data' };
+    if (latestTemp > 40) return { value: latestTemp, display: '--', sub: 'Awaiting sensor' };
+    return { value: latestTemp, display: latestTemp.toFixed(1), sub: 'Body temperature' };
+  })();
 
   // Build chart data filtered to selected time range
   const chartData = useMemo(() => {
@@ -258,18 +310,72 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-white">Dashboard</h1>
           <p className="text-gray-400 text-sm mt-0.5">Real-time glucose monitoring · {displayName}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {lastUpdatedLabel && (
             <span className="text-xs text-gray-500">{lastUpdatedLabel}</span>
           )}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-success/10 border border-success/20 rounded-full">
-            <div className="w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
-            <span className="text-xs text-green-400 font-medium">Live</span>
-          </div>
+
+          {/* ESP32 Demo Toggle Button */}
+          <button
+            onClick={handleToggleDemo}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all duration-300 ${
+              esp32Demo.active
+                ? 'bg-red-500/15 border-red-500/40 text-red-400 hover:bg-red-500/25'
+                : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20'
+            }`}
+          >
+            {esp32Demo.active ? '⏹ Stop Demo' : '▶ Start ESP32 Demo'}
+          </button>
+
+          {/* Clean bad data button */}
+          <button
+            onClick={handleCleanData}
+            disabled={cleaning}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-all duration-300 disabled:opacity-50"
+          >
+            {cleaning ? '⏳ Cleaning…' : '🧹 Clear Bad Data'}
+          </button>
+
+          {/* ESP32 status badge */}
+          {esp32Demo.active ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/10 border border-green-500/30 rounded-full">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-ping" />
+              <div className="w-2 h-2 bg-green-400 rounded-full absolute" style={{ marginLeft: 0 }} />
+              <span className="text-xs text-green-400 font-semibold">ESP32 Live ●</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-success/10 border border-success/20 rounded-full">
+              <div className="w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
+              <span className="text-xs text-green-400 font-medium">Live</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Demo mode banner */}
+      {/* Clean data feedback message */}
+      {cleanMsg && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-green-500/10 border border-green-500/20 rounded-xl animate-fade-in text-sm text-green-400">
+          {cleanMsg}
+        </div>
+      )}
+
+      {/* ESP32 Demo Mode live streaming banner */}
+      {esp32Demo.active && (
+        <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-red-500/10 border border-red-500/30 animate-fade-in">
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+          </span>
+          <span className="text-sm text-red-300 font-medium">
+            🔴 LIVE — ESP32 streaming sensor data to Firebase
+          </span>
+          <span className="ml-auto text-xs text-gray-500">
+            Glucose: {esp32Demo.glucose} · HR: {esp32Demo.heartRate} · Temp: {esp32Demo.temperature}°C
+          </span>
+        </div>
+      )}
+
+      {/* Demo mode banner (Firebase offline fallback — different from ESP32 demo) */}
       {isDemoMode && (
         <div className="demo-banner animate-fade-in">
           <span>🔌</span>
@@ -315,8 +421,21 @@ export default function Dashboard() {
 
       {/* Vitals */}
       <div className="grid grid-cols-2 gap-4">
-        <VitalCard icon="❤️" label="Heart Rate"   value={latestHR   ? Math.round(latestHR)        : null} unit="bpm" sub="Latest reading" />
-        <VitalCard icon="🌡️" label="Temperature" value={latestTemp  ? latestTemp.toFixed(1)        : null} unit="°C"  sub="Body temperature" />
+        <VitalCard
+          icon="❤️"
+          label="Heart Rate"
+          value={latestHR ? Math.round(latestHR) : null}
+          unit="bpm"
+          sub="Latest reading"
+        />
+        <VitalCard
+          icon="🌡️"
+          label="Temperature"
+          value={latestTemp}
+          unit="°C"
+          sub={tempDisplay.sub}
+          displayOverride={tempDisplay.display}
+        />
       </div>
 
       {/* 24hr Chart with range selector */}
