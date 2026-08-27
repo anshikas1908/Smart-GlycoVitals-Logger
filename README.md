@@ -1,9 +1,7 @@
-# Smart-GlycoVitals-Logger
-# Smart GlycoVitals Logger 🩸🤖
+ Smart GlycoVitals Logger 🩸🤖
 
 A comprehensive, dual-mode AI-powered glucose monitoring and prediction dashboard built with React, Firebase, and TensorFlow (LSTM).
 
-![GlycoVitals Dashboard]() <!-- Add a screenshot URL here later -->
 
 ## ✨ Features
 * **Real-time Glucose Tracking**: Log and monitor glucose, heart rate, and body temperature.
