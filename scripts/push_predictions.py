@@ -37,6 +37,13 @@ import pickle
 import numpy as np
 from datetime import datetime
 
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 # ── Path setup ───────────────────────────────────────────────────────────────
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR  = os.path.dirname(SCRIPT_DIR)
