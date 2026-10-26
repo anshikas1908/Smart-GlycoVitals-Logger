@@ -21,7 +21,7 @@
 #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 
 #define FIREBASE_HOST "smart-glycovitals-logger-default-rtdb.asia-southeast1.firebasedatabase.app"
-#define FIREBASE_AUTH "AIzaSyAOxG79nNyl-Smffxut2UgSXWped9rCJMw" // Use your Database Secret or API Key
+#define FIREBASE_AUTH "YOUR_FIREBASE_API_KEY" // Use your Database Secret or API Key
 
 // Option A: Hardcoded Patient ID
 #define PATIENT_ID "U001"
